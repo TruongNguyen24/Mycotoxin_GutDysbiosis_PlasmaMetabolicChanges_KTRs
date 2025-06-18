@@ -75,48 +75,90 @@ dimnames(posterior_clr_orthus$Lambda)[[2]] <- rownames(X)
 dimnames(posterior_clr_orthus$Lambda)[[1]] <- c(colnames(Y), colnames(Z))
 dimnames(posterior_clr_orthus$Sigma)[[1]] <- dimnames(posterior_clr_orthus$Sigma)[[2]] <- c(colnames(Y), colnames(Z))
 
-xcor <- posterior_clr_orthus$Sigma[1:D, (D+1):(D+P),]
+posterior_clr_orthus # This is the outcome for fido::orthus
+posterior_clr_metab # This is the outcome for fido::pibble for metabolites
+posterior_clr_taxa # # This is the outcome for fido::orthus for taxa
 
-# Initial preprocessing to speed up computation of posterior intervals
-# As there are a lot of cross-covariance terms we are going to first 
-# weed down the list of things we have to look at by first pass 
-# selecting only those taxa that have a large posterior mean for the covariance
-xcor.mean <- apply(xcor, c(1,2), mean)
-xcor.mean
+xcorTaxa <- posterior_clr_taxa$Sigma
+dim(xcorTaxa)
+xcorMetab <- posterior_clr_metab$Sigma
+dim(xcorMetab)
+xcorOrthus <- posterior_clr_orthus$Sigma[1:D, (D+1):((D-1+P)+1),]
+dim(xcorOrthus)
 
-to.analyze <- fido::gather_array(xcor.mean, cov, taxa, metabolite) %>% 
-  arrange(-abs(cov)) %>% 
-  .[1:1000,] %>% 
-  mutate(tm =paste0(taxa, "_", metabolite))
-to.analyze
+D <- posterior_clr_orthus$D
+P <- posterior_clr_orthus$P
 
-# Subset Covariance to those we are interested in and calculate posterior 
-# confidence intervals. 
+xcorTaxa.mean <- apply(xcorTaxa, c(1,2), mean)
+colnames(xcorTaxa.mean) <- rownames(xcorTaxa.mean) <- paste0("taxa_",colnames(xcorTaxa.mean))
+  
+xcorMetab.mean <- apply(xcorMetab, c(1,2), mean)
+colnames(xcorMetab.mean) <- rownames(xcorMetab.mean) <- paste0("metab_",colnames(xcorMetab.mean))
+  
+xcorOrthus.mean <- apply(xcorOrthus, c(1,2), mean)
+  
+mega_V <- matrix(NA, nrow=D+P, ncol=D+P)
+rownames(mega_V) <- colnames(mega_V) <- c(rownames(xcorTaxa.mean), rownames(xcorMetab.mean))
+  
+foo <- function(x) mega_V
+mega_V_array <- sapply(1:1000, foo, simplify = 'array')
+for(i in 1:1000){
+    print(i)
+    mega_V_array[1:D,1:D,i] <- xcorTaxa[,,i]
+    mega_V_array[(D+1):(D+P),(D+1):(D+P),i] <- xcorMetab[,,i]
+    mega_V_array[1:D,(D+1):(D+P),i] <- xcorOrthus[,,i]
+    mega_V_array[(D+1):(D+P),1:D,i] <- t(xcorOrthus[,,i])
+  }
 
-xcor.summary <- fido::gather_array(xcor, cov, taxa, metabolite, iter) %>%
-  mutate(tm=paste0(taxa, "_", metabolite)) %>% 
-  filter(tm %in% to.analyze$tm) %>% 
-  mutate(taxa = colnames(Y)[taxa], metabolite = colnames(Z)[metabolite]) %>% 
-  group_by(taxa, metabolite) %>% 
-  summarise(
-    mean   = mean(cov),
-    p2.5   = quantile(cov, 0.025),
-    p5     = quantile(cov, 0.05),
-    p10    = quantile(cov, 0.10),
-    p25    = quantile(cov, 0.25),
-    p50    = quantile(cov, 0.50),
-    p75    = quantile(cov, 0.75),
-    p90    = quantile(cov, 0.90),
-    p95    = quantile(cov, 0.95),
-    p97.5  = quantile(cov, 0.975),
-    .groups = "drop"
-  ) %>% 
-  arrange(mean)
+dim(mega_V_array)
 
-xcor.summary 
+# compute proportionality
 
-# Select those covariances where the model has high certainty (95%) that
-# the true covariance is not zero. 
-taxa_metab <- xcor.summary %>% 
-  filter(sign(p2.5)==sign(p97.5)) %>%
-  filter(abs(mean) > 1)
+compute_proportionality_fast <- function(cov_array) {
+  # Get dimensions
+  n_features <- dim(cov_array)[1]
+  n_samples <- dim(cov_array)[3]
+  
+  print(n_features)
+  print(n_samples)
+  # Initialize output array
+  rho_array <- array(NA, dim = c(n_features, n_features, n_samples))
+  
+  # Compute proportionality for each posterior sample
+  for (k in 1:n_samples) {
+    print(k)
+    cov_matrix <- cov_array[, , k]
+    
+    # Extract variances (diagonal elements)
+    sigma_diag <- diag(cov_matrix)
+    
+    # Compute proportionality using vectorized operations
+    denom <- outer(sigma_diag, sigma_diag, "+")  # Sum of variances
+    rho_mat <- (2 * cov_matrix) / denom  # Compute full rho matrix
+    
+    # Extract lower triangle (including diagonal) and set upper triangle to NA
+    rho_mat[upper.tri(rho_mat, diag = TRUE)] <- NA
+    
+    # Store result
+    rho_array[, , k] <- rho_mat
+  }
+  
+  return(rho_array)
+}
+
+rho_ij <- compute_proportionality_fast(mega_V_array)
+
+rho_ij
+
+# gather results
+library(fido)
+rho_summary <- driver::gather_array(rho_ij, rho, feature_i, feature_j, iter) %>%
+    mutate(feature_i=c(rownames(xcorTaxa.mean), rownames(xcorMetab.mean))[feature_i], feature_j=c(rownames(xcorTaxa.mean), rownames(xcorMetab.mean))[feature_j]) %>% 
+    drop_na() %>% 
+    group_by(feature_i, feature_j) %>% 
+    summarise_posterior(rho) %>% 
+    arrange(mean)
+
+rho_summary   %>% 
+  filter(sign(p2.5)==sign(p97.5)) 
+dim(rho_summary) 
