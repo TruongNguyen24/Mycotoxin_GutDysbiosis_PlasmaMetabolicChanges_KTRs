@@ -1,0 +1,86 @@
+microbe 
+metab
+metadata_surv
+
+f <- c("sex", "age", "BMI" ,"KREA_BLO", "dum_calcineurin.inh", "dum_antibiotics","dum_ppi")
+
+f <- reformulate(termlabels=f)
+X <- t(model.matrix(f, data=metadata_surv))
+#str(metadata_surv)
+X
+
+missing_data_rows <- which(rowSums(is.na(metadata_surv[, all.vars(f)])) > 0)
+missing_data_rows
+
+Y <- microbe # microbiome
+Y <- driver::miniclo(Y)
+Y <- as.matrix(zCompositions::cmultRepl(Y, label=0, method="CZM", z.delete = F))
+dim(Y)    
+Y_clean <- Y[ rownames(Y) != "TL-Nieren-OUD 789", ]
+dim(Y_clean)
+      
+Z <- metab # metabolomics (it already needs to be KNN-imputed)
+Z <- driver::miniclo(Z)
+Z <- as.matrix(zCompositions::cmultRepl(Z, label=0, method="CZM", z.delete = F))
+dim(Z)    
+
+Z_clean <- Z[ rownames(Z) != "TL-Nieren-OUD 789",]
+dim(Z_clean)
+
+
+eta_init <- t(driver::alr(Y_clean))
+rownames(eta_init) <- colnames(Y_clean)[-length(colnames(Y_clean))]
+Z_init <- t(driver::clr(Z_clean)) 
+    
+eta_init_array <- array(eta_init, dim=c(nrow(eta_init), ncol(eta_init), 1000)) # 185 taxa (-1 in ALR) x 118 samples x iterations
+    
+eta_Z <- t(cbind(t(eta_init), t(Z_init))) # 332 features (N_taxa (-1) + N_mbs) x 118 samples
+    
+eta_Z_array <- array(eta_Z, dim=c(nrow(eta_Z), ncol(eta_Z), 1000)) # 331 features (N_taxa + N_mbs) x 118 samples x iterations
+dimnames(eta_Z_array)[[1]] <- c(colnames(Y_clean)[-length(colnames(Y_clean))], colnames(Z_clean))
+dimnames(eta_Z_array)[[2]] <-  rownames(Y_clean)
+    
+N <- ncol(t(Y_clean)) # 447
+P <- nrow(t(Z_clean)) # 256
+Q <- nrow(X) # 8
+D <- nrow(t(Y_clean)) # 151
+    
+upsilon <- (D-1+P)+10 # weak-ish prior on covariance over joint taxa and metabolites
+Xi <- diag(D-1+P)
+GG <- cbind(diag(D-1), -1)
+Xi[1:(D-1), 1:(D-1)] <- GG%*%diag(D) %*% t(GG)
+Xi <- Xi * (upsilon-D-P) 
+Gamma <- diag(Q)
+Theta <- matrix(0, D-1+P, Q)
+    
+priors <- pibble(NULL, X, upsilon, Theta, Gamma, Xi, n_samples=1000)
+
+posterior <- uncollapsePibble(eta=eta_Z_array, X=priors$X, Theta=priors$Theta, Gamma=priors$Gamma, Xi=priors$Xi, upsilon=priors$upsilon, seed=2849)
+    
+posterior2 <- 
+        orthusfit(
+        D=D,
+        N=N,
+        P=P,
+        Q=Q,
+        coord_system="alr",
+        iter=1000L,
+        alr_base=D,
+        Z=t(Z_clean),
+        Y=t(Y_clean),
+        Eta=eta_init_array,
+        Lambda=posterior$Lambda,
+        Sigma=posterior$Sigma,
+        X=X,
+        names_covariates=rownames(X),
+        names_Zdimensions=rownames(t(Z_clean)),
+        names_categories=rownames(t(Y_clean)),
+        names_samples=colnames(t(Y_clean))
+      )
+    
+posterior_clr_orthus <- to_clr(posterior2)
+    
+    # Attached dimnames
+dimnames(posterior_clr_orthus$Lambda)[[2]] <- rownames(X)
+dimnames(posterior_clr_orthus$Lambda)[[1]] <- c(colnames(Y_clean), colnames(Z_clean))
+dimnames(posterior_clr_orthus$Sigma)[[1]] <- dimnames(posterior_clr_orthus$Sigma)[[2]] <- c(colnames(Y_clean), colnames(Z_clean))
