@@ -49,3 +49,31 @@ for(sample_i in rownames(ftbl)){
 # Categorize balance based on median 
 balance_df$balance_cat <- ifelse(balance_df$balance_value>quantile(balance_df$balance_value)[3], "high", "low")
 balance_df$balance_cat <- as.factor(balance_df$balance_cat)
+
+# Violin plot of balance value
+library(ggdist)
+library(ggplot2)
+library(gghalves)
+
+table(balance_df$OTA_encoded)
+balance_df$OTA_encoded <- factor(balance_df$OTA_encoded, levels = c("0", "1"), labels = c("No", "Yes"))
+balance_df$OTA_encoded  <- relevel(balance_df$OTA_encoded , ref = "Yes")
+comparisons2 <- list(c("Yes", "No"))
+
+p_balance <- ggplot(balance_df, aes(x = OTA_encoded, y = balance_value, color = OTA_encoded)) +
+  geom_half_violin(side = "r", trim = FALSE, fill = NA, linewidth = 1) +           # Only outline of violin plot
+  geom_boxplot(width = 0.1, fill = NA, outlier.shape = NA, linewidth = 1) + # Only outline of boxplot
+  geom_jitter(width = 0.15, size = 1, alpha = 0.2) +
+  scale_color_manual(values = c("No" = "#b2abd2",  
+                                "Yes" = "#fdb863")) +
+  stat_compare_means(comparisons = comparisons2, 
+                     method = "wilcox.test", 
+                     label = "p.signif", 
+                     tip.length = 0.01) +
+  theme_classic() +
+  labs(
+       x = "",
+       y = "Balance value") +
+  theme(legend.position = "none")
+
+print(p_balance)
