@@ -1,3 +1,13 @@
+library(phyloseq)
+library(tidyverse)
+library(patchwork)
+library(fido) # for Pibble model
+library(wec) # for weighted sum contrasts
+library(zCompositions) # for 0-imputation 
+library(driver) # for a few CoDa functions; devtools::install_github("jsilve24/driver")
+library(ggtext)
+
+
 microbe # Scaled microbiome data ( samples (rows) x species (columns): row sums are equal to 1))
 metadata_surv # phenotype data
 
