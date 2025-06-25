@@ -1,5 +1,5 @@
 # load dependencies
-```{r}
+
 library(phyloseq)
 library(tidyverse)
 library(patchwork)
@@ -8,19 +8,19 @@ library(wec) # for weighted sum contrasts
 library(zCompositions) # for 0-imputation 
 library(driver) # for a few CoDa functions; devtools::install_github("jsilve24/driver")
 library(ggtext)
-```
+
 
 microbe # Scaled microbiome data ( samples (rows) x species (columns): row sums are equal to 1))
 metadata_surv # phenotype data
 
 
 # Formula
-```{r}
+
 f <- c("sex", "age", "BMI", "OTA_encoded","EnnB_encoded","TeA_encoded", "KREA_BLO", "dum_calcineurin.inh", "dum_antibiotics","dum_ppi")
 f <- reformulate(termlabels=f)
-```
+
 # Run Pibble
-```{r}
+
 X <- t(model.matrix(f, data=metadata_surv))
 dim(X)    
 Y <- microbe
@@ -76,4 +76,4 @@ posterior <- pibblefit(D=D,
     dimnames(posterior_clr_taxa$Lambda)[[2]] <- rownames(X)
     dimnames(posterior_clr_taxa$Lambda)[[1]] <- rownames(Y)
     dimnames(posterior_clr_taxa$Sigma)[[1]] <- dimnames(posterior_clr_taxa$Sigma)[[2]] <- rownames(Y)
-```
+
